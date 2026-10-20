@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Retro Stock Terminal</title>
+    <style>
+        body {
+            background-color: #0c0c0c;
+            color: #00ff00;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 15px;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100svh;
+            box-sizing: border-box;
+        }
+        h2 { font-size: 1.2rem; margin-top: 0; }
+        p { font-size: 0.9rem; }
+        #terminal {
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid #00ff00;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #000;
+            box-shadow: inset 0 0 10px rgba(0, 255, 0, 0.2);
+            font-size: 0.9rem;
+            word-break: break-all;
+        }
+        .input-line {
+            display: flex;
+            align-items: center;
+            background: #000;
+            border: 1px solid #00ff00;
+            padding: 5px 10px;
+        }
+        .prompt {
+            margin-right: 8px;
+            font-weight: bold;
+        }
+        input {
+            flex: 1;
+            background: #000;
+            border: none;
+            color: #00ff00;
+            font-family: inherit;
+            font-size: 1rem;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+    <h2>RETRO FINANCIAL TERMINAL v2.2</h2>
+    <p>Type a ticker (e.g. <code>AAPL</code>) or <code>help</code> for commands.</p>
+    
+    <div id="terminal">System ready. Type commands below.<br></div>
+    
+    <div class="input-line">
+        <span class="prompt">&gt;</span>
+        <input type="text" id="commandInput" autofocus autocomplete="off" autocapitalize="none">
+    </div>
+
+    <script>
+        const term = document.getElementById('terminal');
+        const input = document.getElementById('commandInput');
+        
+        let commandHistory = [];
+        let historyIndex = -1;
+
+        // Keep focus on input field
+        document.addEventListener('click', () => {
+            input.focus();
+        });
+
+        input.addEventListener('keydown', async function(e) {
+            if (e.key === 'Enter') {
+                const cmd = input.value.trim();
+                if (!cmd) return;
+                
+                commandHistory.push(cmd);
+                historyIndex = commandHistory.length;
+
+                appendOutput(`> ${cmd}`);
+                input.value = '';
+
+                const parts = cmd.split(' ');
+                const action = parts[0].toLowerCase();
+                const sub = parts[1] ? parts[1].toLowerCase() : '';
+                const param = parts[2] ? parts[2].toUpperCase() : '';
+
+                try {
+                    if (action === 'watch') {
+                        if (sub === 'add' && param) {
+                            const res = await fetch(`/api/watchlist/add/${param}`);
+                            const data = await res.json();
+                            appendOutput(`[WATCHLIST] Added ${param}. Current list: ${data.watchlist.join(', ')}`);
+                        } else if (sub === 'remove' && param) {
+                            const res = await fetch(`/api/watchlist/remove/${param}`);
+                            const data = await res.json();
+                            appendOutput(`[WATCHLIST] Removed ${param}. Current list: ${data.watchlist.join(', ')}`);
+                        } else if (sub === 'show') {
+                            const res = await fetch('/api/watchlist/show');
+                            const data = await res.json();
+                            if (data.watchlist.length === 0) {
+                                appendOutput(`[WATCHLIST] The watch list is empty.`);
+                            } else {
+                                appendOutput(`--- WATCHLIST QUOTES ---`);
+                                data.watchlist.forEach(item => {
+                                    appendOutput(` > ${item.ticker}: $${item.price}`);
+                                });
+                                appendOutput(`------------------------`);
+                            }
+                        } else {
+                            appendOutput(`Usage: watch add [TICKER], watch remove [TICKER], watch show`);
+                        }
+                    }
+                    else if (action === 'news' && parts[1]) {
+                        const ticker = parts[1];
+                        appendOutput(`Loading news for ${ticker.toUpperCase()}...`);
+                        const res = await fetch(`/api/news/${ticker}`);
+                        const data = await res.json();
+                        if (res.ok && data.news && data.news.length > 0) {
+                            appendOutput(`--- NEWS FOR ${data.ticker} ---`);
+                            data.news.forEach(n => {
+                                appendOutput(` • [${n.publisher}] ${n.title} <a href="${n.link}" target="_blank" style="color: #00ff00; text-decoration: underline;">[view]</a>`);
+                            });
+                            appendOutput(`---------------------------`);
+                        } else {
+                            appendOutput(`No news found for ${ticker.toUpperCase()}.`);
+                        }
+                    }
+                    else if (action === 'help') {
+                        appendOutput(`Available commands:<br>` +
+                                     ` - [TICKER] (e.g. AAPL, TSLA) - Get quick stock quote<br>` +
+                                     ` - watch add [TICKER]<br>` +
+                                     ` - watch remove [TICKER]<br>` +
+                                     ` - watch show (View saved watchlist)<br>` +
+                                     ` - news [TICKER] (Show latest news headlines)<br>` +
+                                     ` - clear (Clear terminal screen)`);
+                    } 
+                    else if (action === 'clear') {
+                        term.innerHTML = '';
+                    } 
+                    else {
+                        // Fallback: If it's a single word, treat it directly as a ticker symbol query!
+                        const ticker = action;
+                        appendOutput(`Fetching quote for ${ticker.toUpperCase()}...`);
+                        const res = await fetch(`/api/stock/${ticker}`);
+                        const data = await res.json();
+                        if (res.ok) {
+                            appendOutput(`[QUOTE] ${data.ticker} | Price: $${data.price} | P/E: ${data.peRatio} | Cap: ${data.marketCap}`);
+                        } else {
+                            appendOutput(`[ERROR] Ticker '${ticker.toUpperCase()}' not found or invalid command.`);
+                        }
+                    }
+                } catch (err) {
+                    appendOutput(`[ERROR] Failed to connect to server.`);
+                }
+            } 
+            // Command History navigation with Arrow Up / Arrow Down
+            else if (e.key === 'ArrowUp') {
+                if (commandHistory.length > 0 && historyIndex > 0) {
+                    historyIndex--;
+                    input.value = commandHistory[historyIndex];
+                }
+                e.preventDefault();
+            } 
+            else if (e.key === 'ArrowDown') {
+                if (commandHistory.length > 0 && historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    input.value = commandHistory[historyIndex];
+                } else {
+                    historyIndex = commandHistory.length;
+                    input.value = '';
+                }
+                e.preventDefault();
+            }
+        });
+
+        function appendOutput(text) {
+            term.innerHTML += text + '<br>';
+            term.scrollTop = term.scrollHeight;
+        }
+    </script>
+</body>
+</html>
